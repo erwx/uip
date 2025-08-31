@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/csv"
+  "encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -10,20 +11,59 @@ import (
 
 // ActionStep represents one row from the CSV file
 type ActionStep struct {
-	District string
-	School   string
-	Step     string
-	Strategy string
+	District    string
+	Step        string
+  Description string
+  Start       string
+  Target      string
+	Strategy    string
+  Resources   string
 }
 
-// NewStep creates a new ActionStep with the given values
-func NewStep(district, school, step, strategy string) *ActionStep {
-	return &ActionStep{
-		District: district,
-		School:   school,
-		Step:     step,
-		Strategy: strategy,
-	}
+type DistrictBatch struct {
+  DistrictName string       `json:"district_name"` 
+  ActionSteps  []ActionInfo `json:"action_steps"`
+}
+
+type ActionInfo struct {
+  Step        string `json:"step"`
+  Description string `json:"description"`
+  Start       string `json:"start"`
+  Target      string `json:"target"`
+  Strategy    string `json:"strategy"`
+  Resources   string `json:"resources"`
+}
+
+func createBatch(districtName string, steps []*ActionStep) *DistrictBatch {
+  batch := DistrictBatch{
+    DistrictName: districtName,
+    ActionSteps: []ActionInfo{},
+  }
+
+  for _, step := range steps {
+    info := ActionInfo{
+      Step:        step.Step,
+      Description: step.Description,
+      Start:       step.Start,
+      Target:      step.Target,
+      Strategy:    step.Strategy,
+      Resources:   step.Resources,
+    }
+    batch.ActionSteps = append(batch.ActionSteps, info)
+  }
+  return &batch
+}
+
+func parseRecord(record []string, headerMap map[string]int) *ActionStep {
+  return &ActionStep {
+    District:    record[headerMap["UIP: District Name"]],
+    Step:        record[headerMap["Improvement Action Step"]],
+    Description: record[headerMap["Description of Action Step"]],
+    Start:       record[headerMap["Start Date"]],
+    Target:      record[headerMap["Target Date"]],
+    Strategy:    record[headerMap["Major Improvement Strategy"]],
+    Resources:   record[headerMap["Resources"]],
+  }
 }
 
 // parseCSV reads a CSV file and returns a slice of ActionSteps
@@ -62,13 +102,7 @@ func parseCSV(filename string) ([]*ActionStep, error) {
 			return nil, fmt.Errorf("failed to read record: %w", err)
 		}
 
-		// Create ActionStep from record
-		step := NewStep(
-			record[headerMap["UIP: District Name"]],
-			record[headerMap["UIP: School Name"]],
-			record[headerMap["Improvement Action Step"]],
-			record[headerMap["Major Improvement Strategy"]],
-		)
+    step := parseRecord(record, headerMap)
 		steps = append(steps, step)
 	}
 
@@ -77,12 +111,30 @@ func parseCSV(filename string) ([]*ActionStep, error) {
 
 func main() {
 	steps, err := parseCSV("ActionSteps.csv")
+
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Loaded %d steps:\n", len(steps))
-	for i := 0; i < 4 && i < len(steps); i++ {
-		fmt.Printf("Step %d: %+v\n", i+1, *steps[i])
-	}
+  // Map district names to ActionSteps
+  districtMap := make(map[string][]*ActionStep)
+  for _, step := range steps {
+    district := step.District
+    districtMap[district] = append(districtMap[district], step)
+  }
+
+  var batches []*DistrictBatch
+
+  for districtName, actionSteps := range districtMap {
+    b := createBatch(districtName, actionSteps)
+    batches = append(batches, b)
+  }
+
+  for i := range batches {
+    j, err := json.Marshal(batches[i])
+    if err != nil {
+      fmt.Printf("JSON error: %v", err)
+    }
+    fmt.Println(string(j))
+  }
 }
